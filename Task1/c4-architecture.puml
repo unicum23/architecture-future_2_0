@@ -1,0 +1,73 @@
+@startuml Целевая архитектура «Будущее 2.0» (через год)
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+LAYOUT_WITH_LEGEND()
+
+title Целевая архитектура (C4: контейнеры) — обеспечение ключевых бизнес-сценариев
+
+Person(biz_user, "Бизнес-пользователь", "Руководитель, аналитик домена: построение отчётов и просмотр KPI в рамках полномочий")
+Person(clinic_op, "Оператор клиники", "Работа с операционными системами, без прямого доступа к аналитике по медкартам")
+Person(data_steward, "Владелец данных", "Качество и доступность доменных витрин")
+
+System_Boundary(cloud, "Облачная платформа «Будущее 2.0»") {
+
+    Container(api_gw, "API-шлюз и политики безопасности", "Kong / Apigee / аналог", "Единая точка входа для синхронных API; аутентификация, rate limit, маршрутизация к доменам. Сценарий: независимое развитие направлений без прямой связности между сервисами")
+
+    Container(event_bus, "Платформа потоковых событий", "Apache Kafka / аналог", "Асинхронный обмен доменными событиями и интеграционными фактами. Сценарий: масштабирование на новые бизнесы и слабая связанность компонентов")
+
+    System_Boundary(domain_fintech, "Домен «Финтех»") {
+        Container(ft_core, "Финтех-сервисы", "Go, Java", "Продукты банка, платежи, кредиты. Автономное развёртывание и независимый релизный цикл")
+        ContainerDb(ft_ods, "Операционное хранилище финтеха", "PostgreSQL / облачная СУБД", "Транзакционные и нормативные данные домена")
+    }
+
+    System_Boundary(domain_ai, "Домен «ИИ»") {
+        Container(ai_svc, "ИИ-сервисы", "Python", "Модели и оркестрация; доступ к разрешённым медицинским данным на основании контрактов данных")
+        ContainerDb(ai_store, "Хранилище артефактов ИИ", "Object storage + метаданные", "Модели, журналы инференса (согласно политике)")
+    }
+
+    System_Boundary(domain_clinical, "Домен «Клиники / операции»") {
+        Container(clin_svc, "Операционные сервисы клиник", "Современный стек", "Расписание, ресурсы, интеграция с оборудованием — без выноса медкарт в аналитический контур")
+        ContainerDb(clin_ods, "Операционное хранилище клиник", "СУБД домена", "Операционные данные; не является витриной для BI")
+    }
+
+    Container(ingestion, "Загрузка и оркестрация данных", "Airflow / dbt / cloud ETL", "CDC, пакетная загрузка из легаси-DWH и доменов в аналитический контур. Сценарий: ускорение отчётности за счёт предрасчётов и слоистой модели")
+
+    Container(lakehouse, "Аналитическое хранилище (Lakehouse)", "Snowflake / Databricks / BigQuery", "Слои: raw → trusted → витрины. Агрегаты и справочники для KPI; персональные клинические детали исключены из витрин по политике")
+    Container(semantic, "Семантический слой / метрики", "dbt Semantic / MetricFlow / аналог", "Единые определения показателей для портала и BI-платформы")
+
+    Container(portal, "Портал самообслуживания (витрина данных)", "Web-приложение", "Конструктор отчётов, выгрузки, дашборды, RBAC. Сценарий: оперативная подготовка отчётности")
+
+    Container(bi, "BI-платформа", "Power BI / облачный BI", "Корпоративная отчётность поверх семантического слоя и витрин, без прямого ad-hoc к ODS")
+
+    Container(legacy_bridge, "Мост от легаси-DWH", "CDC / репликация / API read-only", "Постепенная миграция; снятие отчётной нагрузки с SQL Server 2008")
+    ContainerDb(legacy_dwh, "Легаси DWH (переходный период)", "SQL Server", "Исторические данные и остаточная логика до поэтапного переноса в домены")
+}
+
+Rel(biz_user, portal, "Строит отчёты и просматривает KPI", "HTTPS")
+Rel(data_steward, semantic, "Управляет метриками и витринами", "HTTPS")
+Rel(clinic_op, clin_svc, "Операционная работа", "HTTPS")
+Rel(portal, semantic, "Запросы метрик и витрин", "SQL/API")
+Rel(bi, semantic, "Корпоративные отчёты", "SQL/API")
+Rel(semantic, lakehouse, "Читает витрины", "SQL")
+
+Rel(ft_core, ft_ods, "Читает/пишет", "SQL/TCP")
+Rel(ai_svc, ai_store, "Использует", "SDK")
+Rel(clin_svc, clin_ods, "Читает/пишет", "SQL/TCP")
+
+Rel(ft_core, api_gw, "Публикует API за шлюзом", "REST/gRPC")
+Rel(ai_svc, api_gw, "Публикует API за шлюзом", "REST/gRPC")
+Rel(clin_svc, api_gw, "Публикует API за шлюзом", "REST/gRPC")
+
+Rel(ft_core, event_bus, "Публикует/подписывается", "async")
+Rel(ai_svc, event_bus, "Публикует/подписывается", "async")
+Rel(clin_svc, event_bus, "Публикует/подписывается", "async")
+Rel(ingestion, event_bus, "Потребляет для загрузок", "async")
+
+Rel(ingestion, lakehouse, "Загружает слои", "batch/stream")
+Rel(ingestion, legacy_bridge, "Забирает изменения", "CDC")
+Rel(legacy_bridge, legacy_dwh, "Репликация/чтение", "SQL")
+Rel(ft_ods, ingestion, "По расписанию/CDC", "batch")
+Rel(clin_ods, ingestion, "По политике (без сырых медкарт в витрине)", "batch")
+
+@enduml
