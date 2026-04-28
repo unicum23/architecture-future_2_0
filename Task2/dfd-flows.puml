@@ -1,0 +1,64 @@
+@startuml DFD — потоки данных между доменами
+skinparam defaultFontSize 11
+skinparam ArrowColor #333333
+skinparam componentStyle rectangle
+title DFD (уровень 1): потоки данных между доменами «Будущее 2.0»\nи обеспечение ключевых бизнес-сценариев
+
+left to right direction
+
+package "Внешние сущности" #E8F4FC {
+  [Оператор клиники] as E_Clin
+  [Клиент банка] as E_Bank
+  [Партнёр (фарма)] as E_Pharma
+  [Партнёр (мед. электроника)] as E_Dev
+}
+
+package "Домены (процессы верхнего уровня)" #F0F0F0 {
+  component "P1.\nКлиники и операции" as P_Clin
+  component "P2.\nФинтех" as P_Fin
+  component "P3.\nИИ и клиническая аналитика" as P_AI
+  component "P4.\nПлатформа данных и витрины" as P_Data
+  component "P5.\nИнтеграция и партнёрский контур" as P_Int
+}
+
+database "D1. ODS клиник" as D_Clin
+database "D2. ODS финтеха" as D_Fin
+database "D3. Артефакты ИИ" as D_AI
+database "D4. Lakehouse / витрины / KPI" as D_LH
+database "D5. Журнал событий (шина)" as D_Ev
+database "D6. Легаси-DWH (переходный период)" as D_Legacy
+
+E_Clin --> P_Clin : операционные\nданные
+E_Bank --> P_Fin : платежи,\nзаявки
+E_Pharma --> P_Int : каталоги,\nзаказы
+E_Dev --> P_Int : каталоги,\nпоставки
+
+P_Clin <--> D_Clin : доменные\nтранзакции
+P_Fin <--> D_Fin : доменные\nтранзакции
+P_AI <--> D_AI : модели,\nметаданные
+
+P_Clin --> D_Ev : события домена\n(логика в сервисах,\nне в DWH)
+P_Fin --> D_Ev : события\n(новый финтех-сервис\nпубликует сюда)
+P_AI --> D_Ev : события\nинференса
+
+D_Ev --> P_Data : потоки для\nагрегаций и отчётности
+D_Clin --> P_Data : CDC / батчи\n(агрегаты, без сырых медкарт)
+D_Fin --> P_Data : CDC / батчи
+D_Legacy --> P_Data : мост\n(история)
+
+P_Data --> D_LH : витрины,\ntrusted-слой
+P_Int --> D_Ev : события\nпартнёров
+
+P_Int --> P_Fin : контрактные\nданные
+P_Int --> P_Clin : поставки\nоборудования
+
+P_AI ..> P_Clin : сигналы /\nрезультаты\n(политика доступа)
+D_Clin ..> P_AI : разрешённые\nданные для ИИ\n(не в BI-витрину)
+
+note bottom of P_Data
+  Сценарии: **Новый финтех** — P2 + D_Ev → P_Data без расширения DWH.
+  **ИИ по медданным** — D_Clin → P_AI по контракту; отчётность — P_Data/D_LH.
+  **Партнёры** — E_Pharma/E_Dev → P_Int → D_Ev, P_Fin, P_Clin.
+end note
+
+@enduml
